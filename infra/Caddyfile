@@ -1,0 +1,33 @@
+{
+	admin off
+	# Reverse-proxy error records include the request URI. Keep token URLs out
+	# of runtime logs as well as access logs; API/startup logs remain available.
+	log {
+		exclude http.log.error
+	}
+}
+
+# http://:80 for local Docker; a public domain enables automatic HTTPS.
+{$SITE_ADDRESS:http://:80} {
+	encode zstd gzip
+	root * {$WEB_ROOT:/srv}
+
+	# Do not persist subscription pages/API responses in browser or proxy caches.
+	# Access logging stays disabled, so share tokens do not enter request logs.
+	header {
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+	}
+
+	@api path /api/v1 /api/v1/*
+	handle @api {
+		reverse_proxy {$API_UPSTREAM:api:8080}
+	}
+
+	# Expo web.output=single: direct /s/<token> navigation returns index.html.
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

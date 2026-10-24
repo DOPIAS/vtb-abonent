@@ -1,0 +1,88 @@
+name: abonent
+
+x-api: &api
+  image: abonent-api:local
+  build:
+    context: .
+    dockerfile: infra/api.Dockerfile
+  environment: &api-environment
+    DATABASE_URL: postgres://${POSTGRES_USER:-abonent}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-abonent}?sslmode=disable
+    HTTP_ADDR: :8080
+    MIGRATIONS_DIR: /app/db/migrations
+    PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8090}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081,http://localhost:8082,http://localhost:8090}
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-abonent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-abonent}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    <<: *api
+    command: ["/app/migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *api
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    image: abonent-web:local
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: /api/v1
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://:80}
+    ports:
+      - "${WEB_HTTP_PORT:-8090}:80"
+      - "${WEB_HTTPS_PORT:-8443}:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Explicitly opt in with: docker compose --profile demo run --rm seed
+  seed:
+    <<: *api
+    profiles: ["demo"]
+    command: ["/app/seed"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

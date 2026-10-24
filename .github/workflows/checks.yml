@@ -1,0 +1,71 @@
+name: Checks
+on:
+  push:
+  pull_request:
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: abonent
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: abonent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U abonent -d abonent_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgres://abonent:test-password@localhost:5432/abonent_test?sslmode=disable
+      TEST_DATABASE_URL: postgres://abonent:test-password@localhost:5432/abonent_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - name: Format
+        working-directory: apps/api
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        working-directory: apps/api
+        run: go vet ./...
+      - name: Tests
+        working-directory: apps/api
+        run: go test -race ./...
+      - name: Independent HTTP scenarios
+        run: |
+          cd apps/api
+          go run ./cmd/migrate
+          go run ./cmd/server > /tmp/abonent-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8080/api/v1/health; then break; fi
+            sleep 1
+          done
+          cd ../..
+          python3 tests/integration/run.py
+          python3 tests/integration/phone.py
+          python3 tests/integration/dashboard.py
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test -- --runInBand
+      - run: npx expo-doctor
+      - run: npx expo export --platform web

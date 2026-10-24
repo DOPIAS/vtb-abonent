@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+.expo/
+dist/
+coverage/
+*.log
+bin/
+.tmp/
+__pycache__/
+*.py[cod]

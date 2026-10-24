@@ -1,0 +1,9 @@
+# Optional host ports for Go/Expo development. Bound to localhost deliberately.
+# For Expo Go on a real phone, use the web gateway at http://<LAN-IP>:8090/api/v1.
+services:
+  db:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+  api:
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
